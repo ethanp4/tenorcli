@@ -1,9 +1,13 @@
 [package]
-name = "tenorcli"
-version = "0.1.0"
+name = "Tenorcli"
+version = "0.9.0"
 edition = "2024"
 
 [dependencies]
+clap = { version = "4.5.39", features = ["derive"] }
+reqwest = "0.12.19"
+serde = "1.0.219"
+tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread"]}
 
 [[bin]]
 name = "tenorcli"
