@@ -1,5 +1,6 @@
+use std::env;
 use std::io::{stdin, Read, Write};
-use std::process::{Command, Stdio};
+use std::process::{self, Command, Stdio};
 
 use clap::{Parser, ValueEnum};
 
@@ -44,7 +45,7 @@ struct Cli {
 	#[arg(short, default_value_t = false)]
 	save: bool,
 
-	/// Don't print anything to stdout
+	/// Don't print anything to stdout (except errors and debug)
 	#[arg(short, default_value_t = false)]
 	quiet: bool,
 	
@@ -92,6 +93,15 @@ fn wayland_copy_to_clipboard(text: &str) -> Result<(), std::io::Error> {
 	Ok(())
 }
 
+fn windows_copy_to_clipboard(text: &str) -> Result<(), std::io::Error> {
+	let mut child = Command::new("clip")
+		.stdin(Stdio::piped())
+		.spawn()?;
+
+	child.stdin.as_mut().unwrap().write_all(text.as_bytes())?;
+	Ok(())
+}
+
 #[tokio::main]
 async fn main () -> Result<(), Error> {
 	dotenv().ok();
@@ -100,7 +110,7 @@ async fn main () -> Result<(), Error> {
 	// let mut stdin_query = String::new();
 	// stdin().read_to_string(&mut stdin_query)?;
 	let query = if args.query.len() != 0 { args.query.join(" ") } else { "cat".to_string() };
-	println!("{}", query);
+	// println!("{}", query);
 	let request_url = format!("https://g.tenor.com/v2/search?q={query}&key={key}&limit={limit}",
 		query = query,
 		key = key,
@@ -115,7 +125,7 @@ async fn main () -> Result<(), Error> {
 		.send()
 		.await?;
 
-	println!("{}", response.status());
+	// println!("{}", response.status());
 	let result: ApiResult = response.json().await?;
 	let gifs: Vec<Gif> = result.results;
 
@@ -127,34 +137,73 @@ async fn main () -> Result<(), Error> {
 		println!("====== END DEBUG ======");
 	} 
 
-	//print the array
-	let mut idx = 0;
-	for gif in &gifs {
-		if args.extended {
-			idx += 1;
-			println!("{}{}:\n {}\n {}\n {:?}\n \"{}\"\n", "Gif ".underline(), idx.to_string().underline(), gif.itemurl, gif.url, gif.tags, gif.content_description);
-		} else {
-			match args.type_url {
-				URLType::Gif => {
-					println!("{}", gif.url);
-				}
-				URLType::Page => {
-					println!("{}", gif.itemurl);
+	if !args.quiet {
+		//print the array
+		let mut idx = 0;
+		for gif in &gifs {
+			if args.extended {
+				idx += 1;
+				println!("{}{}:\n {}\n {}\n {:?}\n \"{}\"\n", "Gif ".underline(), idx.to_string().underline(), gif.itemurl, gif.url, gif.tags, gif.content_description);
+			} else {
+				match args.type_url {
+					URLType::Gif => {
+						println!("{}", gif.url);
+					}
+					URLType::Page => {
+						println!("{}", gif.itemurl);
+					}
 				}
 			}
 		}
 	}
-
-	if args.copy {
+	
+	if args.copy || args.save {
 		let max = &gifs.len()-1;
 		let idx = rand::rng().random_range(0..max);
 		let random_gif = &gifs[idx];
-		let _ = x11_copy_to_clipboard(if args.type_url == URLType::Gif { &random_gif.url } else { &random_gif.itemurl });
+		let random_gif_link = if args.type_url == URLType::Gif { &random_gif.url } else { &random_gif.itemurl };
+		let supported_os = ["linux", "openbsd", "freebsd", "netbsd", "windows"];
+		let os = env::consts::OS;
+
+		if args.copy {
+			match os {
+				"linux"|"openbsd"|"freebsd"|"netbsd" => {
+					if env::var_os("DISPLAY").is_some() {
+						if let Err(e) = x11_copy_to_clipboard(&random_gif_link) {
+							eprintln!("An error occured when calling `xclip`: {e}\nHeres your random link: {}", &random_gif_link);
+							process::exit(1);
+						}
+					} else if env::var_os("WAYLAND_DISPLAY").is_some() {
+						if let Err(e) = wayland_copy_to_clipboard(&random_gif_link) {
+							eprintln!("An error occured when calling `wl-copy`: {e}\nHeres your random link: {}", &random_gif_link);
+							process::exit(1);
+						}
+					} else {
+						eprintln!("Failed to detect display server, are DISPLAY or WAYLAND_DISPLAY set?\nHeres your random link: {}", &random_gif_link);
+						process::exit(1);
+					}
+				},
+				"windows" => {
+					if let Err(e) = windows_copy_to_clipboard(&random_gif_link) {
+						eprintln!("An error occured when calling `clip`: {e}\nHeres your random link: {}", &random_gif_link);
+						process::exit(1);
+					}
+				}
+				_ => {
+					eprintln!("Unsupported os \"{}\" for the copy function. Supported operating systems are {:?}\nHeres your random link: {}", os, supported_os, &random_gif_link);
+					process::exit(1);
+				}
+			}
+		}
+	
+		if args.save {
+			// match os {
+			println!("{:?}", dirs_next::picture_dir());
+
+			// }
+		}
 	}
 
-	if args.save {
-
-	}
 
 	Ok(())
 }
