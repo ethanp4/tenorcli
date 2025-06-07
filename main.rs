@@ -1,15 +1,23 @@
-use std::env;
+use std::path::Path;
+use std::time::SystemTime;
+use std::{env, io};
+use std::fs::File;
 use std::io::{stdin, Read, Write};
 use std::process::{self, Command, Stdio};
 
 use clap::{Parser, ValueEnum};
 
 use colored::Colorize;
-use rand::Rng;
+use rand::{random_range, Rng};
 use serde::Deserialize;
 use reqwest::Error;
 use reqwest::header::USER_AGENT;
 use dotenv::dotenv;
+
+#[derive(Deserialize, Debug)]
+struct ApiResult {
+	results: Vec<Gif>
+}
 
 #[derive(Deserialize, Debug)]
 struct Gif {
@@ -23,11 +31,20 @@ struct Gif {
 	url: String,
 	/// User supplied tags
 	tags: Vec<String>,
+	/// "Media format" containing data about each file format of that item
+	media_formats: MediaFormats
 }
 
 #[derive(Deserialize, Debug)]
-struct ApiResult {
-	results: Vec<Gif>
+struct MediaFormats {
+	mediumgif: MediaInfo,
+	gif: MediaInfo
+}
+
+#[derive(Deserialize, Debug)]
+struct MediaInfo {
+	url: String,
+	size: u32
 }
 
 #[derive(Parser, Debug)]
@@ -50,7 +67,7 @@ struct Cli {
 	quiet: bool,
 	
 	/// URL Type
-	#[arg(short, value_enum, default_value_t = URLType::Page)]
+	#[arg(short, value_enum, default_value_t = URLType::Gif)]
 	type_url: URLType,
 
 	/// Print extended details. When set, both url types are printed regardless of -t
@@ -132,8 +149,9 @@ async fn main () -> Result<(), Error> {
 	//print debug info
 	if args.debug {
 		println!("====== DEBUG ======");
-		println!("allargs: {:#?}", &args);
-		println!("result: {:#?}", &gifs);
+		println!("api result: {:#?}", &gifs);
+		println!("args struct: {:#?}", &args);
+		println!("request url: {}", &request_url);
 		println!("====== END DEBUG ======");
 	} 
 
@@ -158,10 +176,11 @@ async fn main () -> Result<(), Error> {
 	}
 	
 	if args.copy || args.save {
-		let max = &gifs.len()-1;
+		let max = gifs.len();
 		let idx = rand::rng().random_range(0..max);
 		let random_gif = &gifs[idx];
-		let random_gif_link = if args.type_url == URLType::Gif { &random_gif.url } else { &random_gif.itemurl };
+		let gif_direct_link = &random_gif.media_formats.gif.url;
+		let random_gif_link = if args.type_url == URLType::Gif { &gif_direct_link } else { &random_gif.itemurl };
 		let supported_os = ["linux", "openbsd", "freebsd", "netbsd", "windows"];
 		let os = env::consts::OS;
 
@@ -197,10 +216,28 @@ async fn main () -> Result<(), Error> {
 		}
 	
 		if args.save {
-			// match os {
-			println!("{:?}", dirs_next::picture_dir());
+			let picture_dir = dirs_next::picture_dir().unwrap();
+			//send request
+			let client = reqwest::Client::new();
+			let response = client
+				.get(gif_direct_link)
+				.header(USER_AGENT, "rust-web-api-client")
+				.send()
+				.await?;
 
-			// }
+			let mut filename = gif_direct_link.split("/").last().unwrap().to_string().clone();
+			let mut path = picture_dir.join(&filename);
+			if Path::new(&path).exists() {
+				let random = random_range(0..=100000).to_string();
+				filename.insert_str(filename.len()-4, &random);
+				path = picture_dir.join(&filename);
+			}
+
+			let mut file = File::create(&path).expect("Failed to create file");
+			
+			let response_bytes = response.bytes().await?;
+			file.write_all(&response_bytes).unwrap();
+			println!("Saved file to {:?}", &path);
 		}
 	}
 
