@@ -1,31 +1,67 @@
+use std::io::{stdin, Read, Write};
+use std::process::{Command, Stdio};
+
 use clap::{Parser, ValueEnum};
 
+use colored::Colorize;
+use rand::Rng;
 use serde::Deserialize;
 use reqwest::Error;
 use reqwest::header::USER_AGENT;
+use dotenv::dotenv;
 
-#[derive(Debug)]
-#[derive(Parser)]
+#[derive(Deserialize, Debug)]
+struct Gif {
+	id: String,
+	created: f32,
+	/// Tenor's ai generated description
+	content_description: String,
+	/// Page url
+	itemurl: String,
+	/// .gif url
+	url: String,
+	/// User supplied tags
+	tags: Vec<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ApiResult {
+	results: Vec<Gif>
+}
+
+#[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
-	/// Desired number of results
-	#[arg(short, default_value_t = 10)]
-	num: u16,
+	/// Number of items to list
+	#[arg(short, default_value_t = 10, value_parser = clap::value_parser!(u8).range(1..=50))]
+	limit: u8,
 	
-	/// Automatically copy a random link to the clipboard selected from the value of -n
+	/// Automatically copy a random link to the clipboard selected from the value of -l
 	#[arg(short, default_value_t = false)]
 	copy: bool,
 
-	/// Automatically download a random gif to the Pictures library selected from the value of -n
+	/// Automatically save a random gif to the Pictures library selected from the value of -l
 	#[arg(short, default_value_t = false)]
-	download: bool,
+	save: bool,
+
+	/// Don't print anything to stdout
+	#[arg(short, default_value_t = false)]
+	quiet: bool,
 	
 	/// URL Type
 	#[arg(short, value_enum, default_value_t = URLType::Page)]
 	type_url: URLType,
 
-	/// A search term to query the tenor api. With no options a list of 10 links will be printed to the console
-	search_term: Vec<String>,
+	/// Print extended details. When set, both url types are printed regardless of -t
+	#[arg(short, default_value_t = false)]
+	extended: bool,
+
+	/// Debug options
+	#[arg(short, default_value_t = false)]
+	debug: bool,
+
+	/// A search term to query the tenor api. When run without arguments you get cat gifs
+	query: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -37,10 +73,88 @@ enum URLType {
 	Page
 }
 
+fn x11_copy_to_clipboard(text: &str) -> Result<(), std::io::Error> {
+	let mut child = Command::new("xclip")
+		.args(["-sel", "clip"])
+		.stdin(Stdio::piped())
+		.spawn()?;
+    
+	child.stdin.as_mut().unwrap().write_all(text.as_bytes())?;
+	Ok(())
+}
+
+fn wayland_copy_to_clipboard(text: &str) -> Result<(), std::io::Error> {
+	let mut child = Command::new("wl-copy")
+		.stdin(Stdio::piped())
+		.spawn()?;
+
+	child.stdin.as_mut().unwrap().write_all(text.as_bytes())?;
+	Ok(())
+}
+
 #[tokio::main]
 async fn main () -> Result<(), Error> {
+	dotenv().ok();
+	let key = std::env::var("API_KEY").expect("Set an api key with --set-api-key <TOKEN>");
 	let args = Cli::parse();
+	// let mut stdin_query = String::new();
+	// stdin().read_to_string(&mut stdin_query)?;
+	let query = if args.query.len() != 0 { args.query.join(" ") } else { "cat".to_string() };
+	println!("{}", query);
+	let request_url = format!("https://g.tenor.com/v2/search?q={query}&key={key}&limit={limit}",
+		query = query,
+		key = key,
+		limit = args.limit,
+	);
 
-	println!("all args: {:#?}", args);
+	//send request
+	let client = reqwest::Client::new();
+	let response = client
+		.get(&request_url)
+		.header(USER_AGENT, "rust-web-api-client")
+		.send()
+		.await?;
+
+	println!("{}", response.status());
+	let result: ApiResult = response.json().await?;
+	let gifs: Vec<Gif> = result.results;
+
+	//print debug info
+	if args.debug {
+		println!("====== DEBUG ======");
+		println!("allargs: {:#?}", &args);
+		println!("result: {:#?}", &gifs);
+		println!("====== END DEBUG ======");
+	} 
+
+	//print the array
+	let mut idx = 0;
+	for gif in &gifs {
+		if args.extended {
+			idx += 1;
+			println!("{}{}:\n {}\n {}\n {:?}\n \"{}\"\n", "Gif ".underline(), idx.to_string().underline(), gif.itemurl, gif.url, gif.tags, gif.content_description);
+		} else {
+			match args.type_url {
+				URLType::Gif => {
+					println!("{}", gif.url);
+				}
+				URLType::Page => {
+					println!("{}", gif.itemurl);
+				}
+			}
+		}
+	}
+
+	if args.copy {
+		let max = &gifs.len()-1;
+		let idx = rand::rng().random_range(0..max);
+		let random_gif = &gifs[idx];
+		let _ = x11_copy_to_clipboard(if args.type_url == URLType::Gif { &random_gif.url } else { &random_gif.itemurl });
+	}
+
+	if args.save {
+
+	}
+
 	Ok(())
 }
