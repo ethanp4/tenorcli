@@ -1,6 +1,5 @@
 use std::path::Path;
-use std::time::SystemTime;
-use std::{env, io};
+use std::env;
 use std::fs::File;
 use std::io::{stdin, Read, Write};
 use std::process::{self, Command, Stdio};
@@ -32,63 +31,116 @@ struct Gif {
 	/// User supplied tags
 	tags: Vec<String>,
 	/// "Media format" containing data about each file format of that item
-	media_formats: MediaFormats
+	media_formats: MediaFormats,
+	content_description_source: String,
+
 }
 
 #[derive(Deserialize, Debug)]
 struct MediaFormats {
+	nanowebm: MediaInfo,
+	nanomp4: MediaInfo,
+	mp4: MediaInfo,
+	nanogif: MediaInfo,
+	tinymp4: MediaInfo,
+	tinygifpreview: MediaInfo,
+	webp: MediaInfo,
+	gif: MediaInfo,
 	mediumgif: MediaInfo,
-	gif: MediaInfo
+	nanogifpreview: MediaInfo,
+	tinywebm: MediaInfo,
+	webm: MediaInfo,
+	loopedmp4: MediaInfo,
+	tinygif: MediaInfo,
+	gifpreview: MediaInfo
 }
 
 #[derive(Deserialize, Debug)]
 struct MediaInfo {
 	url: String,
+	duration: f32,
+	preview: String,
 	size: u32
 }
 
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(version, about = "Tenorcli allows you to use tenor from the cli", after_help = format!("{}\n - tenorcli (equivalent to tenorcli -t page -l10 cat)\n - tenorcli --limit 15 yakuza goro majima watermelon\n - tenorcli -l5 -cq kitten good morning\n - tenorcli --copy-random --type=file embed failure\n - tenorcli -t file -r nano-gif dog", "Example usage:".bold().underline()), long_about = None)]
 struct Cli {
 	/// Number of items to list
-	#[arg(short, default_value_t = 10, value_parser = clap::value_parser!(u8).range(1..=50))]
+	#[arg(long, short, default_value_t = 10, value_parser = clap::value_parser!(u8).range(1..=50))]
 	limit: u8,
 	
-	/// Automatically copy a random link to the clipboard selected from the value of -l
-	#[arg(short, default_value_t = false)]
-	copy: bool,
+	/// Copy a random link (according to -t) to the clipboard selected from the list derived with <LIMIT>
+	#[arg(long, short, default_value_t = false)]
+	copy_random: bool,
 
-	/// Automatically save a random gif to the Pictures library selected from the value of -l
-	#[arg(short, default_value_t = false)]
-	save: bool,
+	/// Save a random gif to the Pictures library selected from the list derived with <LIMIT>
+	#[arg(long, short, default_value_t = false)]
+	save_random: bool,
 
 	/// Don't print anything to stdout (except errors and debug)
-	#[arg(short, default_value_t = false)]
+	#[arg(long, short, default_value_t = false)]
 	quiet: bool,
 	
-	/// URL Type
-	#[arg(short, value_enum, default_value_t = URLType::Gif)]
-	type_url: URLType,
+	/// URL Type to display / copy
+	#[arg(long, short, value_enum, default_value_t = URLType::File)]
+	r#type: URLType,
 
-	/// Print extended details. When set, both url types are printed regardless of -t
-	#[arg(short, default_value_t = false)]
+	/// Lots of media types are provided by the api. You can see links to all of them with -e. This option is only effective with -t file (default behaviour)
+	#[arg(long, short, value_enum, default_value_t = GifResolution::MediumGif)]
+	resolution: GifResolution,
+
+	/// Print all gif details. Not effected by -t
+	#[arg(long, short, default_value_t = false)]
 	extended: bool,
 
-	/// Debug options
-	#[arg(short, default_value_t = false)]
+	/// Display the args struct and the api request url
+	#[arg(long, short, default_value_t = false)]
 	debug: bool,
 
-	/// A search term to query the tenor api. When run without arguments you get cat gifs
+	/// Set a v2 api key that you got from Google here: https://developers.google.com/tenor/guides/quickstart
+	#[arg(long, default_value_t = String::new())]
+	set_api_key: String,
+
+	/// A search term to query the tenor api. The default is "cats"
 	query: Vec<String>,
 }
 
 #[derive(Debug)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum URLType {
-	/// Direct .gif link
-	Gif,
-	/// Page url to the tenor link, suitable for discord (will display full resolution)
+	/// Direct media link
+	File,
+	/// Page url to the tenor link, suitable for discord embeds
 	Page
+}
+
+#[derive(Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum GifResolution {
+	/// Can be quite large
+	Gif,
+	/// Slightly compressed but not noticable
+	MediumGif,
+	/// Noticably compressed
+	TinyGif,
+	/// Even more compressed
+	NanoGif,
+	/// Animated webp
+	Webp,
+	/// Regular thumbnail
+	GifPreview,
+	/// Small thumbnail
+	TinyGifPreview,
+	/// Very small thumbnail
+	NanoGifPreview,
+	Mp4,
+	LoopedMp4,
+	TinyMp4,
+	NanoMp4,
+	Webm,
+	TinyWebm,
+	NanoWebm,
 }
 
 fn x11_copy_to_clipboard(text: &str) -> Result<(), std::io::Error> {
@@ -119,6 +171,26 @@ fn windows_copy_to_clipboard(text: &str) -> Result<(), std::io::Error> {
 	Ok(())
 }
 
+fn get_requested_media_url<'a>(gif: &'a Gif, resolution: GifResolution) -> &'a std::string::String {
+	return match resolution {
+			GifResolution::Gif => &gif.media_formats.gif.url,
+			GifResolution::MediumGif => &gif.media_formats.mediumgif.url,
+			GifResolution::TinyGif => &gif.media_formats.tinygif.url,
+			GifResolution::NanoGif => &gif.media_formats.nanogif.url,
+			GifResolution::Webp => &gif.media_formats.webp.url,
+			GifResolution::GifPreview => &gif.media_formats.gifpreview.url,
+			GifResolution::TinyGifPreview => &gif.media_formats.tinygifpreview.url,
+			GifResolution::NanoGifPreview => &gif.media_formats.nanogifpreview.url,
+			GifResolution::Mp4 => &gif.media_formats.mp4.url,
+			GifResolution::LoopedMp4 => &gif.media_formats.loopedmp4.url,
+			GifResolution::TinyMp4 => &gif.media_formats.tinymp4.url,
+			GifResolution::NanoMp4 => &gif.media_formats.nanomp4.url,
+			GifResolution::Webm => &gif.media_formats.webm.url,
+			GifResolution::TinyWebm => &gif.media_formats.tinywebm.url,
+			GifResolution::NanoWebm => &gif.media_formats.nanowebm.url,
+		};
+}
+
 #[tokio::main]
 async fn main () -> Result<(), Error> {
 	dotenv().ok();
@@ -126,7 +198,7 @@ async fn main () -> Result<(), Error> {
 	let args = Cli::parse();
 	// let mut stdin_query = String::new();
 	// stdin().read_to_string(&mut stdin_query)?;
-	let query = if args.query.len() != 0 { args.query.join(" ") } else { "cat".to_string() };
+	let query = if args.query.len() != 0 { args.query.join(" ") } else { "cats".to_string() };
 	// println!("{}", query);
 	let request_url = format!("https://g.tenor.com/v2/search?q={query}&key={key}&limit={limit}",
 		query = query,
@@ -149,7 +221,7 @@ async fn main () -> Result<(), Error> {
 	//print debug info
 	if args.debug {
 		println!("====== DEBUG ======");
-		println!("api result: {:#?}", &gifs);
+		// println!("api result: {:#?}", &gifs);
 		println!("args struct: {:#?}", &args);
 		println!("request url: {}", &request_url);
 		println!("====== END DEBUG ======");
@@ -161,11 +233,13 @@ async fn main () -> Result<(), Error> {
 		for gif in &gifs {
 			if args.extended {
 				idx += 1;
-				println!("{}{}:\n {}\n {}\n {:?}\n \"{}\"\n", "Gif ".underline(), idx.to_string().underline(), gif.itemurl, gif.url, gif.tags, gif.content_description);
+				// println!("{}{}:\n {}\n {}\n Tags: {:?}\n {:#?}\nDescription: \"{}\"\n", "Gif ".underline(), idx.to_string().underline(), gif.itemurl, gif.url, gif.tags, gif.media_formats, gif.content_description);
+				println!("{:#?}", gifs);
 			} else {
-				match args.type_url {
-					URLType::Gif => {
-						println!("{}", gif.url);
+				match args.r#type {
+					URLType::File => {
+						let requested_url = get_requested_media_url(gif, args.resolution);
+						println!("{}", requested_url);
 					}
 					URLType::Page => {
 						println!("{}", gif.itemurl);
@@ -175,16 +249,16 @@ async fn main () -> Result<(), Error> {
 		}
 	}
 	
-	if args.copy || args.save {
+	if args.copy_random || args.save_random {
 		let max = gifs.len();
 		let idx = rand::rng().random_range(0..max);
 		let random_gif = &gifs[idx];
-		let gif_direct_link = &random_gif.media_formats.gif.url;
-		let random_gif_link = if args.type_url == URLType::Gif { &gif_direct_link } else { &random_gif.itemurl };
+		let gif_direct_link = get_requested_media_url(random_gif, args.resolution);
+		let random_gif_link = if args.r#type == URLType::File { &gif_direct_link } else { &random_gif.itemurl };
 		let supported_os = ["linux", "openbsd", "freebsd", "netbsd", "windows"];
 		let os = env::consts::OS;
 
-		if args.copy {
+		if args.copy_random {
 			match os {
 				"linux"|"openbsd"|"freebsd"|"netbsd" => {
 					if env::var_os("DISPLAY").is_some() {
@@ -215,7 +289,7 @@ async fn main () -> Result<(), Error> {
 			}
 		}
 	
-		if args.save {
+		if args.save_random {
 			let picture_dir = dirs_next::picture_dir().unwrap();
 			//send request
 			let client = reqwest::Client::new();
@@ -240,7 +314,6 @@ async fn main () -> Result<(), Error> {
 			println!("Saved file to {:?}", &path);
 		}
 	}
-
 
 	Ok(())
 }
