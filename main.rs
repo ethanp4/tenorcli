@@ -1,17 +1,16 @@
 use std::path::Path;
 use std::env;
 use std::fs::File;
-use std::io::{stdin, Read, Write};
+use std::io::Write;
 use std::process::{self, Command, Stdio};
 
 use clap::{Parser, ValueEnum};
-
 use colored::Colorize;
 use rand::{random_range, Rng};
 use serde::Deserialize;
 use reqwest::Error;
 use reqwest::header::USER_AGENT;
-use dotenv::dotenv;
+use dotenv;
 
 #[derive(Deserialize, Debug)]
 struct ApiResult {
@@ -173,29 +172,40 @@ fn windows_copy_to_clipboard(text: &str) -> Result<(), std::io::Error> {
 
 fn get_requested_media_url<'a>(gif: &'a Gif, resolution: GifResolution) -> &'a std::string::String {
 	return match resolution {
-			GifResolution::Gif => &gif.media_formats.gif.url,
-			GifResolution::MediumGif => &gif.media_formats.mediumgif.url,
-			GifResolution::TinyGif => &gif.media_formats.tinygif.url,
-			GifResolution::NanoGif => &gif.media_formats.nanogif.url,
-			GifResolution::Webp => &gif.media_formats.webp.url,
-			GifResolution::GifPreview => &gif.media_formats.gifpreview.url,
-			GifResolution::TinyGifPreview => &gif.media_formats.tinygifpreview.url,
-			GifResolution::NanoGifPreview => &gif.media_formats.nanogifpreview.url,
-			GifResolution::Mp4 => &gif.media_formats.mp4.url,
-			GifResolution::LoopedMp4 => &gif.media_formats.loopedmp4.url,
-			GifResolution::TinyMp4 => &gif.media_formats.tinymp4.url,
-			GifResolution::NanoMp4 => &gif.media_formats.nanomp4.url,
-			GifResolution::Webm => &gif.media_formats.webm.url,
-			GifResolution::TinyWebm => &gif.media_formats.tinywebm.url,
-			GifResolution::NanoWebm => &gif.media_formats.nanowebm.url,
-		};
+		GifResolution::Gif => &gif.media_formats.gif.url,
+		GifResolution::MediumGif => &gif.media_formats.mediumgif.url,
+		GifResolution::TinyGif => &gif.media_formats.tinygif.url,
+		GifResolution::NanoGif => &gif.media_formats.nanogif.url,
+		GifResolution::Webp => &gif.media_formats.webp.url,
+		GifResolution::GifPreview => &gif.media_formats.gifpreview.url,
+		GifResolution::TinyGifPreview => &gif.media_formats.tinygifpreview.url,
+		GifResolution::NanoGifPreview => &gif.media_formats.nanogifpreview.url,
+		GifResolution::Mp4 => &gif.media_formats.mp4.url,
+		GifResolution::LoopedMp4 => &gif.media_formats.loopedmp4.url,
+		GifResolution::TinyMp4 => &gif.media_formats.tinymp4.url,
+		GifResolution::NanoMp4 => &gif.media_formats.nanomp4.url,
+		GifResolution::Webm => &gif.media_formats.webm.url,
+		GifResolution::TinyWebm => &gif.media_formats.tinywebm.url,
+		GifResolution::NanoWebm => &gif.media_formats.nanowebm.url,
+	};
 }
 
 #[tokio::main]
 async fn main () -> Result<(), Error> {
-	dotenv().ok();
-	let key = std::env::var("API_KEY").expect("Set an api key with --set-api-key <TOKEN>");
+	let config_filename = dirs_next::config_dir().expect("dirs_next couldnt get a config dir").join("tenorcli.conf");
 	let args = Cli::parse();
+	if !args.set_api_key.is_empty() {
+		let mut file = File::create(&config_filename).unwrap();
+		file.write_all(format!("API_KEY={}", args.set_api_key).as_bytes()).expect("Couldnt write to config file");
+		println!("New API key was written to {:?}", config_filename)
+	}
+	
+	if config_filename.exists() {
+		dotenv::from_filename(config_filename).ok();
+	}
+	
+	let key = std::env::var("API_KEY").expect("Set an api key with --set-api-key <TOKEN>");
+	
 	// let mut stdin_query = String::new();
 	// stdin().read_to_string(&mut stdin_query)?;
 	let query = if args.query.len() != 0 { args.query.join(" ") } else { "cats".to_string() };
@@ -214,10 +224,6 @@ async fn main () -> Result<(), Error> {
 		.send()
 		.await?;
 
-	// println!("{}", response.status());
-	let result: ApiResult = response.json().await?;
-	let gifs: Vec<Gif> = result.results;
-
 	//print debug info
 	if args.debug {
 		println!("====== DEBUG ======");
@@ -227,12 +233,19 @@ async fn main () -> Result<(), Error> {
 		println!("====== END DEBUG ======");
 	} 
 
+	if !response.status().is_success() {
+		eprintln!("Didn't get a success code from the api, your api key might be incorrect");
+		process::exit(1);
+	}
+
+	// println!("{}", response.status());
+	let result: ApiResult = response.json().await?;
+	let gifs: Vec<Gif> = result.results;
+
 	if !args.quiet {
 		//print the array
-		let mut idx = 0;
 		for gif in &gifs {
 			if args.extended {
-				idx += 1;
 				// println!("{}{}:\n {}\n {}\n Tags: {:?}\n {:#?}\nDescription: \"{}\"\n", "Gif ".underline(), idx.to_string().underline(), gif.itemurl, gif.url, gif.tags, gif.media_formats, gif.content_description);
 				println!("{:#?}", gifs);
 			} else {
@@ -290,8 +303,7 @@ async fn main () -> Result<(), Error> {
 		}
 	
 		if args.save_random {
-			let picture_dir = dirs_next::picture_dir().unwrap();
-			//send request
+			let picture_dir = dirs_next::picture_dir().expect("dirs_next couldnt get a picture dir");
 			let client = reqwest::Client::new();
 			let response = client
 				.get(gif_direct_link)
@@ -310,7 +322,7 @@ async fn main () -> Result<(), Error> {
 			let mut file = File::create(&path).expect("Failed to create file");
 			
 			let response_bytes = response.bytes().await?;
-			file.write_all(&response_bytes).unwrap();
+			file.write_all(&response_bytes).expect("Couldn't write to file");
 			println!("Saved file to {:?}", &path);
 		}
 	}
