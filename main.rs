@@ -147,7 +147,7 @@ fn x11_copy_to_clipboard(text: &str) -> Result<(), std::io::Error> {
 		.args(["-sel", "clip"])
 		.stdin(Stdio::piped())
 		.spawn()?;
-    
+		
 	child.stdin.as_mut().unwrap().write_all(text.as_bytes())?;
 	Ok(())
 }
@@ -163,6 +163,15 @@ fn wayland_copy_to_clipboard(text: &str) -> Result<(), std::io::Error> {
 
 fn windows_copy_to_clipboard(text: &str) -> Result<(), std::io::Error> {
 	let mut child = Command::new("clip")
+		.stdin(Stdio::piped())
+		.spawn()?;
+
+	child.stdin.as_mut().unwrap().write_all(text.as_bytes())?;
+	Ok(())
+}
+
+fn macos_copy_to_clipboard(text: &str) -> Result<(), std::io::Error> {
+	let mut child = Command::new("pbcopy")
 		.stdin(Stdio::piped())
 		.spawn()?;
 
@@ -268,8 +277,13 @@ async fn main () -> Result<(), Error> {
 		let random_gif = &gifs[idx];
 		let gif_direct_link = get_requested_media_url(random_gif, args.resolution);
 		let random_gif_link = if args.r#type == URLType::File { &gif_direct_link } else { &random_gif.itemurl };
-		let supported_os = ["linux", "openbsd", "freebsd", "netbsd", "windows"];
+		let supported_os = ["linux", "openbsd", "freebsd", "netbsd", "windows", "macos"];
 		let os = env::consts::OS;
+
+		if !supported_os.contains(&os) {
+			eprintln!("Unsupported os \"{}\" for the copy function. Supported operating systems are {:?}\nHeres your random link: {}", os, supported_os, &random_gif_link);
+			process::exit(1);
+		}
 
 		if args.copy_random {
 			match os {
@@ -294,11 +308,14 @@ async fn main () -> Result<(), Error> {
 						eprintln!("An error occured when calling `clip`: {e}\nHeres your random link: {}", &random_gif_link);
 						process::exit(1);
 					}
+				},
+				"macos" => {
+					if let Err(e) = macos_copy_to_clipboard(&random_gif_link) {
+						eprintln!("An error occured when calling `pbcopy`: {e}\nHeres your random link: {}", &random_gif_link);
+						process::exit(1);
+					}
 				}
-				_ => {
-					eprintln!("Unsupported os \"{}\" for the copy function. Supported operating systems are {:?}\nHeres your random link: {}", os, supported_os, &random_gif_link);
-					process::exit(1);
-				}
+				_ => {} // this path is already handled above
 			}
 		}
 	
