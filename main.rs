@@ -98,10 +98,11 @@ struct Cli {
 	debug: bool,
 
 	/// Set a v2 api key that you got from Google here: https://developers.google.com/tenor/guides/quickstart
-	#[arg(long, default_value_t = String::new())]
-	set_api_key: String,
+	#[arg(long)]
+	set_api_key: Option<String>,
 
-	/// A search term to query the tenor api. The default is "cats"
+	/// A search term to query the tenor api
+	#[arg(required_unless_present = "set_api_key")]
 	query: Vec<String>,
 }
 
@@ -203,21 +204,22 @@ fn get_requested_media_url<'a>(gif: &'a Gif, resolution: GifResolution) -> &'a s
 async fn main () -> Result<(), Error> {
 	let config_filename = dirs_next::config_dir().expect("dirs_next couldnt get a config dir").join("tenorcli.conf");
 	let args = Cli::parse();
-	if !args.set_api_key.is_empty() {
+	if args.set_api_key.is_some() {
 		let mut file = File::create(&config_filename).unwrap();
-		file.write_all(format!("API_KEY={}", args.set_api_key).as_bytes()).expect("Couldnt write to config file");
-		println!("New API key was written to {:?}", config_filename)
+		file.write_all(format!("API_KEY={}", args.set_api_key.as_ref().unwrap()).as_bytes()).expect("Couldnt write to config file");
+		println!("New API key was written to {:?}", config_filename);
+		process::exit(0);
 	}
 	
 	if config_filename.exists() {
 		dotenv::from_filename(config_filename).ok();
 	}
 	
-	let key = std::env::var("API_KEY").expect("Set an api key with --set-api-key <TOKEN>");
+	let key = std::env::var("API_KEY").expect(format!("{}", "An API key is required. Get one from https://developers.google.com/tenor/guides/quickstart and set it with --set-api-key <TOKEN>".bold()).as_str());
 	
 	// let mut stdin_query = String::new();
 	// stdin().read_to_string(&mut stdin_query)?;
-	let query = if args.query.len() != 0 { args.query.join(" ") } else { "cats".to_string() };
+	let query = args.query.join(" ");
 	// println!("{}", query);
 	let request_url = format!("https://g.tenor.com/v2/search?q={query}&key={key}&limit={limit}",
 		query = query,
