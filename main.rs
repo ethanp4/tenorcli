@@ -63,7 +63,18 @@ struct MediaInfo {
 }
 
 #[derive(Parser, Debug)]
-#[command(version, about = "Tenorcli allows you to use tenor from the cli", after_help = format!("{}\n - tenorcli (equivalent to tenorcli -t page -l10 cat)\n - tenorcli --limit 15 yakuza goro majima watermelon\n - tenorcli -l5 -cq kitten good morning\n - tenorcli --copy-random --type=file embed failure\n - tenorcli -t file -r nano-gif dog", "Example usage:".bold().underline()), long_about = None)]
+#[command(version, about = "Tenorcli allows you to use tenor from the cli", after_help = format!("{}
+ - tenorcli -sl1 freebsd cat {}
+ - tenorcli -l5 -cq kitten good morning {}
+ - tenorcli --limit 15 yakuza goro majima watermelon {}
+ - tenorcli -t file -r nano-gif dog {}", 
+ 	"Example usage:".bold().underline(), 
+	"-- save the result to a file in the users pictures library".bold(),
+	"-- copy a random link from the first 5 results, with no output".bold(),
+	"-- list 15 gif links".bold(),
+	"-- copy a random link from the first 10 results with a very small resolution".bold()
+), long_about = None)]
+	
 struct Cli {
 	/// Number of items to list
 	#[arg(long, short, default_value_t = 10, value_parser = clap::value_parser!(u8).range(1..=50))]

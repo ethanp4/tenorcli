@@ -4,6 +4,8 @@ With tenorcli you can search, copy links, and/or save gifs to your computer from
 
 ### Installing and updating
 `cargo install --git https://github.com/ethanp4/tenorcli.git`
+#### To remove
+`cargo uninstall tenorcli`
 
 ### Compiling
 `cargo build`
@@ -15,7 +17,7 @@ Set it using `tenorcli --set-api-key <key>`
 For `--copy-random`, `xclip` is required for x11 or `wl-clipboard` for wayland
 
 ### Usage examples:
- - `tenorcli -sl1 freebsd cat` -- save the result to a file in the users pictures library (using [dirs_next](https://crates.io/crates/dirs-next))
+ - `tenorcli -sl1 freebsd cat` -- save the result to a file in the users pictures library (uses [dirs_next](https://crates.io/crates/dirs-next) to find the path)
  - `tenorcli -l5 -cq kitten good morning` -- copy a random link from the first 5 results, with no output
  - `tenorcli --limit 15 yakuza goro majima watermelon` -- list 15 gif links
  - `tenorcli -t file -r nano-gif dog` -- copy a random link from the first 10 results with a very small resolution
