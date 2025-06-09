@@ -2,6 +2,9 @@
 tenorcli is a cli program for fetching from the [tenor api](https://developers.google.com/tenor/guides/quickstart)<br>
 With tenorcli you can search, copy links, and/or save gifs to your computer from the commandline<br>
 
+### Installing and updating
+run `cargo install --git ssh://git@github.com/ethanp4/tenorcli.git`
+
 ### Compiling
 run `cargo build`
 
